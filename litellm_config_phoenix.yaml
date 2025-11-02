@@ -6,7 +6,10 @@ model_list:
   - model_name: "anthropic/*"
     litellm_params:
       model: "anthropic/*"
+      # API key optional - will use OAuth if present in request headers
       api_key: os.environ/ANTHROPIC_API_KEY
+      # Forward client headers (enables OAuth passthrough)
+      _forward_headers: true
 
 litellm_settings:
   # Enable Arize Phoenix callbacks for local observability
@@ -21,6 +24,9 @@ litellm_settings:
   # Allow pass-through of all parameters
   pass_through_params: true
 
+  # Forward all headers from client (enables OAuth passthrough)
+  forward_headers: true
+
   # Disable authentication by default (can be overridden with LITELLM_MASTER_KEY)
   disable_auth: true
 
@@ -33,8 +39,8 @@ router_settings:
   disable_cooldowns: true
   allowed_fails: 1000
 
-# Phoenix environment configuration
+# Phoenix environment configuration (pointing to external Phoenix on host)
 environment_variables:
-  PHOENIX_COLLECTOR_ENDPOINT: "http://phoenix:4317"
-  PHOENIX_COLLECTOR_HTTP_ENDPOINT: "http://phoenix:6006/v1/traces"
+  PHOENIX_COLLECTOR_ENDPOINT: "http://host.docker.internal:4317"
+  PHOENIX_COLLECTOR_HTTP_ENDPOINT: "http://host.docker.internal:6006/v1/traces"
 
