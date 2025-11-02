@@ -63,8 +63,15 @@ services:
       - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - PHOENIX_COLLECTOR_ENDPOINT=http://host.docker.internal:4317
 
+      # Session tracking environment variables
+      - PHOENIX_SESSION_ID=${PHOENIX_SESSION_ID:-}
+      - PHOENIX_SESSION_TYPE=${PHOENIX_SESSION_TYPE:-general}
+      - PHOENIX_PROMPT_VERSION=${PHOENIX_PROMPT_VERSION:-v1}
+      - PHOENIX_SESSION_NAME=${PHOENIX_SESSION_NAME:-}
+
       # Give the resource a name so you can filter by service
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=${OTEL_SERVICE_NAME:-dev-agent-lens},openinference.project.name=${OTEL_SERVICE_NAME:-dev-agent-lens}
+      # Include session metadata as resource attributes for Phoenix filtering
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=${OTEL_SERVICE_NAME:-dev-agent-lens},openinference.project.name=${OTEL_SERVICE_NAME:-dev-agent-lens},session.id=${PHOENIX_SESSION_ID:-},session.type=${PHOENIX_SESSION_TYPE:-general},session.prompt_version=${PHOENIX_PROMPT_VERSION:-v1},session.name=${PHOENIX_SESSION_NAME:-}
     env_file:
       - .env
     command:

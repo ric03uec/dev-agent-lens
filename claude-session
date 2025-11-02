@@ -1,0 +1,282 @@
+#!/bin/bash
+#
+# claude-session - Wrapper script for Claude Code with Phoenix session tracking
+#
+# This script manages Phoenix session metadata for tracking different workflows,
+# prompt versions, and cost/latency analysis.
+#
+# Usage:
+#   claude-session --type code-review --version v2 --name "async-refactor"
+#   claude-session -t debugging -v v1
+#   claude-session --type documentation --version v3 "Document the API"
+#
+# Options:
+#   -t, --type     Session type (e.g., code-review, debugging, documentation)
+#   -v, --version  Prompt version (e.g., v1, v2, v3)
+#   -n, --name     Optional descriptive name for this session
+#   -s, --shell    Start interactive shell instead of running Claude Code command
+#   -r, --reset    Reset to default session and exit
+#   -h, --help     Show this help message
+#
+
+set -euo pipefail
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Default values
+SESSION_TYPE="general"
+PROMPT_VERSION="v1"
+SESSION_NAME=""
+INTERACTIVE_SHELL=false
+RESET_SESSION=false
+CLAUDE_CMD=""
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Function to print colored messages
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+Usage: claude-session [OPTIONS] [CLAUDE_COMMAND]
+
+Wrapper script for Claude Code with Phoenix session tracking.
+
+Options:
+  -t, --type TYPE        Session type (e.g., code-review, debugging, documentation)
+                         Default: general
+
+  -v, --version VERSION  Prompt version (e.g., v1, v2, v3)
+                         Default: v1
+
+  -n, --name NAME        Optional descriptive name for this session
+                         (e.g., "async-refactor", "api-docs-v2")
+
+  -s, --shell            Start interactive shell with session active
+                         instead of running a single Claude Code command
+
+  -r, --reset            Reset to default session (clears session metadata)
+
+  -h, --help             Show this help message
+
+Examples:
+  # Start a code review session with prompt v2
+  claude-session --type code-review --version v2 --name "async-refactor"
+
+  # Debug session with specific Claude Code command
+  claude-session -t debugging -v v1 "analyze this error"
+
+  # Documentation session in interactive shell mode
+  claude-session --type documentation --version v3 --shell
+
+  # Reset to default session
+  claude-session --reset
+
+Session Tracking:
+  Each session is assigned a unique ID and tagged with:
+  - Session Type: Category of work (code-review, debugging, etc.)
+  - Prompt Version: Your prompt iteration version
+  - Session Name: Optional descriptive label
+
+  View sessions in Phoenix UI: http://localhost:6006
+  Filter by session.type, session.prompt_version, or session.name
+
+EOF
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -t|--type)
+            SESSION_TYPE="$2"
+            shift 2
+            ;;
+        -v|--version)
+            PROMPT_VERSION="$2"
+            shift 2
+            ;;
+        -n|--name)
+            SESSION_NAME="$2"
+            shift 2
+            ;;
+        -s|--shell)
+            INTERACTIVE_SHELL=true
+            shift
+            ;;
+        -r|--reset)
+            RESET_SESSION=true
+            shift
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        -*)
+            log_error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+        *)
+            # Remaining arguments are Claude Code command
+            CLAUDE_CMD="$*"
+            break
+            ;;
+    esac
+done
+
+# Function to reset session to defaults
+reset_session() {
+    log_info "Resetting to default session..."
+
+    export PHOENIX_SESSION_ID=""
+    export PHOENIX_SESSION_TYPE="general"
+    export PHOENIX_PROMPT_VERSION="v1"
+    export PHOENIX_SESSION_NAME=""
+
+    # Restart container with default settings
+    cd "$SCRIPT_DIR"
+    docker compose --profile phoenix up -d --force-recreate litellm-proxy-phoenix
+
+    log_success "Session reset to defaults"
+    log_info "All future traces will use default session metadata"
+}
+
+# Handle reset mode
+if [ "$RESET_SESSION" = true ]; then
+    reset_session
+    exit 0
+fi
+
+# Generate unique session ID (timestamp + short random)
+SESSION_ID="${SESSION_TYPE}-$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3)"
+
+# Export session environment variables
+export PHOENIX_SESSION_ID="$SESSION_ID"
+export PHOENIX_SESSION_TYPE="$SESSION_TYPE"
+export PHOENIX_PROMPT_VERSION="$PROMPT_VERSION"
+export PHOENIX_SESSION_NAME="$SESSION_NAME"
+
+# Print session info
+log_info "Starting new Phoenix session..."
+echo ""
+echo "  Session ID:       $SESSION_ID"
+echo "  Session Type:     $SESSION_TYPE"
+echo "  Prompt Version:   $PROMPT_VERSION"
+echo "  Session Name:     ${SESSION_NAME:-<none>}"
+echo ""
+
+# Restart LiteLLM container with new session metadata
+log_info "Restarting LiteLLM proxy with session metadata..."
+cd "$SCRIPT_DIR"
+
+# Check if container is running
+if docker ps --format '{{.Names}}' | grep -q "litellm-proxy-phoenix"; then
+    docker compose --profile phoenix up -d --force-recreate litellm-proxy-phoenix
+
+    # Wait for health check
+    log_info "Waiting for proxy to be healthy..."
+    sleep 3
+
+    # Check health
+    if curl -s http://localhost:4000/health > /dev/null 2>&1; then
+        log_success "Proxy is healthy and ready"
+    else
+        log_warning "Proxy may not be fully ready yet. Waiting..."
+        sleep 3
+    fi
+else
+    log_error "LiteLLM proxy container is not running!"
+    log_info "Start it first with: docker compose --profile phoenix up -d"
+    exit 1
+fi
+
+echo ""
+log_success "Session started successfully!"
+echo ""
+
+# Check if ANTHROPIC_BASE_URL is set
+if [ -z "$ANTHROPIC_BASE_URL" ]; then
+    log_warning "ANTHROPIC_BASE_URL is not set!"
+    echo ""
+    echo "  ${YELLOW}Configure Claude Code to use the proxy:${NC}"
+    echo "  ${GREEN}export ANTHROPIC_BASE_URL=http://localhost:4000${NC}"
+    echo ""
+    echo "  Or add to your shell config:"
+    echo "  ${GREEN}echo 'export ANTHROPIC_BASE_URL=http://localhost:4000' >> ~/.zshrc${NC}"
+    echo ""
+
+    # Offer to set it for this session
+    read -p "Set ANTHROPIC_BASE_URL for this session? (Y/n) " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        export ANTHROPIC_BASE_URL=http://localhost:4000
+        log_success "ANTHROPIC_BASE_URL set to http://localhost:4000"
+    fi
+else
+    log_info "Using proxy: $ANTHROPIC_BASE_URL"
+fi
+
+echo ""
+log_info "All Claude Code requests will now be tagged with this session."
+log_info "View traces in Phoenix UI: ${BLUE}http://localhost:6006${NC}"
+echo ""
+
+# Handle different execution modes
+if [ "$INTERACTIVE_SHELL" = true ]; then
+    log_info "Starting interactive shell with session active..."
+    echo ""
+    echo "  ${GREEN}Session is active!${NC} Run Claude Code commands as normal."
+    echo "  Type 'exit' when done to end the session."
+    echo ""
+
+    # Start interactive shell with session context
+    bash --rcfile <(cat ~/.bashrc; echo "PS1='${GREEN}[phoenix-session: $SESSION_TYPE]${NC} \$ '") -i
+
+elif [ -n "$CLAUDE_CMD" ]; then
+    log_info "Running Claude Code command..."
+    echo ""
+
+    # Run Claude Code command
+    claude code "$CLAUDE_CMD"
+
+else
+    log_info "Session is active for this terminal."
+    log_info "Run your Claude Code commands normally."
+    echo ""
+    echo "  ${YELLOW}Tip:${NC} Use ${GREEN}claude code \"your prompt\"${NC} to make requests"
+    echo "  ${YELLOW}Tip:${NC} Run ${GREEN}claude-session --reset${NC} when done to clear session"
+    echo ""
+fi
+
+# Offer to reset session on exit
+if [ "$INTERACTIVE_SHELL" = true ]; then
+    echo ""
+    read -p "Reset session to defaults? (y/N) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        reset_session
+    else
+        log_info "Session still active. Run 'claude-session --reset' to clear it."
+    fi
+fi

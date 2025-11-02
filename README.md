@@ -86,6 +86,48 @@ CLAUDE_LENS_PROXY_URL=http://remote-server:4000 ./claude-lens  # Via environment
 
 **That's it!** Claude Code now routes through LiteLLM for consistent API handling.
 
+## Session Tracking (Phoenix)
+
+Track different workflows, prompt versions, and costs using Phoenix session metadata.
+
+### Quick Start with Sessions
+
+```bash
+# Start a code review session with prompt v2
+./claude-session --type code-review --version v2 --name "async-refactor"
+
+# Run Claude Code commands in the session
+claude code "Review this authentication module"
+
+# Reset when done
+./claude-session --reset
+```
+
+### Use Cases
+
+- **Track cost per workflow**: Compare spending across code-review, debugging, documentation
+- **Iterate on prompts**: Test v1, v2, v3 and measure token usage, latency, quality
+- **A/B testing**: Compare different prompt approaches side-by-side
+- **Filter in Phoenix**: Use session.type, session.prompt_version, session.name
+
+### Session Commands
+
+```bash
+# Interactive session shell
+./claude-session --type debugging --version v1 --shell
+
+# One-off command with session
+./claude-session --type testing --version v2 "Generate unit tests for auth.py"
+
+# Reset to defaults
+./claude-session --reset
+
+# Help and options
+./claude-session --help
+```
+
+**📖 [Complete Session Tracking Guide →](SESSION_TRACKING.md)**
+
 ## View Observability in Arize
 
 - Open [Arize AI Dashboard](https://app.arize.com)
